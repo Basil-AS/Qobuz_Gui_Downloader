@@ -28,7 +28,7 @@ class LyricsSearcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Qobuz GUI Downloader v1.0.1 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
+            'User-Agent': 'Qobuz GUI Downloader v1.0.2 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
         })
     
     def _is_instrumental_text(self, text: str) -> bool:
@@ -57,10 +57,15 @@ class LyricsSearcher:
         """
         # Убираем номера треков в начале (01., 1., 001. и т.д.)
         clean_title = re.sub(r'^\d+\.\s*', '', title)
-        # Убираем все в скобках, квадратных скобках и одинарных кавычках
-        clean_title = re.sub(r'\s*\(.*?\)\s*|\s*\[.*?\]\s*|\s*\'.*?\'\s*', '', clean_title)
+        # Убираем все в скобках, квадратных скобках, одинарных и двойных кавычках, а также кавычки-ёлочки
+        clean_title = re.sub(r"\s*\(.*?\)\s*|\s*\[.*?\]\s*|\s*'.*?'\s*|\s*\".*?\"\s*|\s*«.*?»\s*", '', clean_title)
+        # Убираем подчёркивания и подряд идущие символы подчёркивания
+        clean_title = re.sub(r'_+', ' ', clean_title)
         # Убираем распространенные "лишние" слова
         clean_title = re.sub(r'\s*-\s*(live|remix|reprise|acoustic|version)\s*', '', clean_title, flags=re.IGNORECASE)
+        # Нормализуем пробелы и спецсимволы
+        clean_title = re.sub(r'\s+', ' ', clean_title)
+        clean_title = clean_title.strip(' _-\t\n\r').strip()
         return clean_title.strip().lower()
     
     def search_lyrics(self, artist: str, title: str, album: str = None, duration: int = None) -> Tuple[Optional[str], Optional[str]]:
