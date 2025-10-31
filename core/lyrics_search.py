@@ -28,7 +28,7 @@ class LyricsSearcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Qobuz GUI Downloader v1.0.0 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
+            'User-Agent': 'Qobuz GUI Downloader v1.0.1 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
         })
     
     def _is_instrumental_text(self, text: str) -> bool:
@@ -53,10 +53,12 @@ class LyricsSearcher:
     def _get_clean_title(self, title: str) -> str:
         """
         Убирает из названия ремиксы, версии и прочее для более чистого сравнения.
-        Удаляет всё в скобках () и [] для точного сравнения базового названия.
+        Удаляет всё в скобках () и [] и одинарных кавычках для точного сравнения базового названия.
         """
-        # Убираем все в скобках и квадратных скобках
-        clean_title = re.sub(r'\s*\(.*?\)\s*|\s*\[.*?\]\s*', '', title)
+        # Убираем номера треков в начале (01., 1., 001. и т.д.)
+        clean_title = re.sub(r'^\d+\.\s*', '', title)
+        # Убираем все в скобках, квадратных скобках и одинарных кавычках
+        clean_title = re.sub(r'\s*\(.*?\)\s*|\s*\[.*?\]\s*|\s*\'.*?\'\s*', '', clean_title)
         # Убираем распространенные "лишние" слова
         clean_title = re.sub(r'\s*-\s*(live|remix|reprise|acoustic|version)\s*', '', clean_title, flags=re.IGNORECASE)
         return clean_title.strip().lower()
@@ -142,7 +144,7 @@ class LyricsSearcher:
             Лучший кандидат или None
         """
         best_candidate = None
-        highest_score = -1  # Используем -1, чтобы любой положительный результат был лучше
+        highest_score = float('-inf')  # Минус бесконечность, чтобы любой score был лучше
         
         MIN_ARTIST_SCORE = 90  # Требуем почти идеального совпадения исполнителя
         
@@ -185,7 +187,7 @@ class LyricsSearcher:
             # --- Правило 3: Проверка длительности ---
             item_duration = item.get('duration', 0)
             duration_diff = abs(target_duration - item_duration)
-            if target_duration > 0 and duration_diff > 3:  # Погрешность до 3 секунд
+            if target_duration > 0 and duration_diff > 100:  # Погрешность до 100 секунд (альбомные/расширенные версии)
                 logger.debug(f"Отброшен (длительность): {item_duration}с vs {target_duration}с (разница {duration_diff:.1f}с)")
                 continue
             

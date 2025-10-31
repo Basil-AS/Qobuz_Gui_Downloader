@@ -145,7 +145,7 @@ def main():
         try:
             import ctypes
             # Устанавливаем уникальный AppID для приложения
-            myappid = 'qobuzguidownloader.app.1.0.0'
+            myappid = 'qobuzguidownloader.app.1.0.1'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
             logger.info("✓ Windows AppUserModelID установлен")
         except Exception as e:
