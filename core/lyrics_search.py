@@ -1,19 +1,29 @@
 """
 Модуль для поиска текстов песен
-Двухэтапный алгоритм: /api/search (все варианты) → фильтрация synced/plain
+Строгий алгоритм: поиск → фильтрация → выбор лучшего
 Приоритет: синхронизированные тексты → обычные тексты
 """
 import re
 import requests
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
+
+try:
+    from rapidfuzz import fuzz
+    FUZZ_AVAILABLE = True
+except ImportError:
+    FUZZ_AVAILABLE = False
+    logging.warning("Библиотека rapidfuzz не установлена. Сравнение строк будет менее точным. Рекомендуется: pip install rapidfuzz")
 
 
 logger = logging.getLogger(__name__)
 
 
 class LyricsSearcher:
-    """Класс для поиска текстов песен"""
+    """
+    Класс для надежного поиска текстов песен с приоритетом синхронизированных версий
+    и строгой фильтрацией для предотвращения ложных срабатываний.
+    """
     
     def __init__(self):
         self.session = requests.Session()
@@ -29,397 +39,181 @@ class LyricsSearcher:
         if not text or not text.strip():
             return False
         
-        # Сначала проверяем на маркеры в ПОЛНОМ тексте (включая скобки)
-        instrumental_markers_full = [
-            r'^\s*\[instrumental\]\s*$',
-            r'^\s*\[инструментал\]\s*$',
-            r'\[au:\s*instrumental\]'
-        ]
-        
-        for marker in instrumental_markers_full:
-            if re.search(marker, text, re.IGNORECASE | re.MULTILINE):
-                return True
-        
-        # Убираем таймкоды LRC, чтобы они не мешали поиску
-        plain_text = re.sub(r'\[\d{2}:\d{2}\.\d{2,3}\]', '', text).strip()
-        
-        # Если после очистки ничего не осталось (только таймкоды)
+        # Убираем таймкоды и метаданные
+        plain_text = re.sub(r'\[.*?\]', '', text).strip().lower()
         if not plain_text:
-            return False  # Это не "инструментал", а просто пустой LRC
-        
-        # Проверяем длину текста - маркеры обычно короткие (до 30 символов)
-        if len(plain_text) > 30:
             return False
         
-        # Если слишком много строк, маловероятно что это просто маркер
-        lines = [line.strip() for line in plain_text.splitlines() if line.strip()]
-        if len(lines) > 3:
-            return False
-        
-        # Ключевые слова инструментальных треков (без скобок) - только для коротких текстов
-        instrumental_markers = [
-            r'^\s*instrumental\s*$',
-            r'^\s*инструментал\s*$',
-            r'^\s*instrumental\s+version\s*$'
-        ]
-        
-        # Проверяем наличие маркеров в очищенном тексте
-        for marker in instrumental_markers:
-            if re.search(marker, plain_text, re.IGNORECASE):
-                return True
+        # Короткий текст с ключевыми словами
+        if len(plain_text) < 30 and any(m in plain_text for m in ['instrumental', 'инструментал']):
+            return True
         
         return False
     
+    def _get_clean_title(self, title: str) -> str:
+        """
+        Убирает из названия ремиксы, версии и прочее для более чистого сравнения.
+        Удаляет всё в скобках () и [] для точного сравнения базового названия.
+        """
+        # Убираем все в скобках и квадратных скобках
+        clean_title = re.sub(r'\s*\(.*?\)\s*|\s*\[.*?\]\s*', '', title)
+        # Убираем распространенные "лишние" слова
+        clean_title = re.sub(r'\s*-\s*(live|remix|reprise|acoustic|version)\s*', '', clean_title, flags=re.IGNORECASE)
+        return clean_title.strip().lower()
+    
     def search_lyrics(self, artist: str, title: str, album: str = None, duration: int = None) -> Tuple[Optional[str], Optional[str]]:
         """
-        Двухэтапный поиск текстов: сначала synced, потом plain
+        Основной метод поиска, реализующий алгоритм "Поиск → Фильтрация → Выбор лучшего".
         
         Returns:
             Tuple[plain_text, lrc_text] - обычный текст и LRC (если найден synced)
         """
-        logger.info(f"🔍 Поиск текста: {artist} - {title}")
+        logger.info(f"🔍 Поиск текста для: {artist} - {title} (длительность: {duration}с)")
         
         # Проверка на инструментальный трек по названию
-        instrumental_keywords = ['instrumental', 'инструментал', 'piano version', 'orchestral', 'acoustic']
+        instrumental_keywords = ['instrumental', 'инструментал']
         title_lower = title.lower()
         if any(keyword in title_lower for keyword in instrumental_keywords):
-            # Для инструментальных треков не ищем тексты
             if not any(word in title_lower for word in ['feat', 'vocals', 'with', 'sung']):
                 logger.info("🎼 Инструментальный трек - пропускаем поиск текстов")
                 return None, None
         
-        # Шаг 1: Используем /api/search для получения всех вариантов
-        search_results = self._search_lrclib_all(artist, title, album, duration)
-        
-        if search_results:
-            logger.info(f"✓ Найдено {len(search_results)} вариантов текста")
-            
-            # Фильтруем результаты: должно быть СТРОГОЕ совпадение по названию И исполнителю
-            filtered_results = self._filter_results_strict(search_results, artist, title)
-            
-            if not filtered_results:
-                logger.warning("⚠ Нет результатов с точным совпадением названия и исполнителя")
-                logger.info("💡 Это предотвращает получение текстов от других песен")
-                return None, None
-            
-            logger.info(f"✓ После строгой фильтрации осталось {len(filtered_results)} совпадений")
-            
-            # Приоритет 1: Синхронизированный текст
-            for result in filtered_results:
-                synced = result.get('syncedLyrics')
-                if synced and not result.get('instrumental'):
-                    # Проверяем, не является ли текст заглушкой
-                    if self._is_instrumental_text(synced):
-                        logger.info("🎼 Обнаружена заглушка [Instrumental] в LRC - пропускаем")
-                        continue
-                    
-                    # Проверяем наличие таймкодов
-                    if re.search(r'\[\d{2}:\d{2}\.\d{2,3}\]', synced):
-                        plain_text, lrc_text = self._process_lyrics(synced)
-                        if lrc_text:
-                            logger.info("✅ Получен СИНХРОНИЗИРОВАННЫЙ текст (lrclib.net)")
-                            return plain_text, lrc_text
-            
-            # Приоритет 2: Обычный текст (если synced нигде нет)
-            for result in filtered_results:
-                plain = result.get('plainLyrics')
-                if plain and not result.get('instrumental'):
-                    # Проверяем, не является ли текст заглушкой
-                    if self._is_instrumental_text(plain):
-                        logger.info("🎼 Обнаружена заглушка [Instrumental] - пропускаем")
-                        continue
-                    
-                    logger.info("✅ Получен ОБЫЧНЫЙ текст (без таймкодов, lrclib.net)")
-                    return plain, None
-        
-        # Шаг 2: Широкий поиск через syncedlyrics (несколько провайдеров)
-        logger.info(f"🔍 Расширенный поиск через syncedlyrics...")
-        result = self._search_syncedlyrics(artist, title)
-        if result:
-            # Проверяем на заглушку перед обработкой
-            if self._is_instrumental_text(result):
-                logger.info("🎼 Обнаружена заглушка [Instrumental] - пропускаем")
-                return None, None
-            
-            plain_text, lrc_text = self._process_lyrics(result)
-            if lrc_text:
-                logger.info("✅ Получен СИНХРОНИЗИРОВАННЫЙ текст (syncedlyrics)")
-                return plain_text, lrc_text
-            elif plain_text:
-                logger.info("✅ Получен ОБЫЧНЫЙ текст (syncedlyrics)")
-                return plain_text, None
-        
-        logger.warning(f"❌ Текст не найден: {artist} - {title}")
-        logger.info("💡 Рекомендации: проверьте правильность написания (включая регистр)")
-        return None, None
-    
-    def _filter_results_strict(self, results, target_artist: str, target_title: str):
-        """
-        МАКСИМАЛЬНО СТРОГАЯ фильтрация по исполнителю И названию.
-        Проверяет оба поля для предотвращения ложных совпадений.
-        """
-        # Нормализуем целевые значения
-        target_artist_norm = target_artist.lower().strip()
-        target_title_norm = target_title.lower().strip()
-        target_title_base = re.sub(r'\s*\([^)]*\)\s*', '', target_title_norm).strip()
-        
-        # Создаём список допустимых вариантов исполнителя (для транслитерации)
-        target_artist_variants = [target_artist_norm]
-        
-        # Простая проверка: если исполнитель на кириллице, он может быть и латиницей
-        # Например: Земфира / Zemfira
-        if any(ord(c) > 127 for c in target_artist_norm):
-            # Содержит не-ASCII символы (кириллица)
-            target_artist_variants.append(target_artist_norm)
-        
-        filtered = []
-        for result in results:
-            # Проверка исполнителя
-            result_artist = result.get('artistName', '').lower().strip()
-            
-            # Для исполнителя допускаем небольшую вариативность
-            artist_match = False
-            for variant in target_artist_variants:
-                if (result_artist == variant or
-                    result_artist in variant or
-                    variant in result_artist or
-                    # Проверка первых 4 символов для транслитерации
-                    (len(result_artist) >= 4 and len(variant) >= 4 and 
-                     result_artist[:4] == variant[:4])):
-                    artist_match = True
-                    break
-            
-            if not artist_match:
-                continue
-            
-            # Проверка названия - ТОЛЬКО точное совпадение
-            result_title = result.get('trackName', '').lower().strip()
-            result_title_base = re.sub(r'\s*\([^)]*\)\s*', '', result_title).strip()
-            
-            title_match = (
-                result_title == target_title_norm or
-                result_title_base == target_title_base
-            )
-            
-            if title_match:
-                filtered.append(result)
-                logger.debug(f"  ✓ Совпадение: '{result.get('artistName')}' - '{result.get('trackName')}'")
-        
-        return filtered
-    
-    def _filter_results_by_title(self, results, target_title: str):
-        """
-        МАКСИМАЛЬНО СТРОГАЯ фильтрация результатов по совпадению названия.
-        Возвращает ТОЛЬКО точные совпадения, предотвращает получение текстов от других песен.
-        """
-        # Нормализуем целевое название
-        target_normalized = target_title.lower().strip()
-        # Убираем всё в скобках для сравнения базовой части
-        target_base = re.sub(r'\s*\([^)]*\)\s*', '', target_normalized).strip()
-        
-        filtered = []
-        for result in results:
-            track_name = result.get('trackName', '').lower().strip()
-            track_base = re.sub(r'\s*\([^)]*\)\s*', '', track_name).strip()
-            
-            # ТОЛЬКО точное совпадение! Никаких "startswith" или "contains"
-            # Вариант 1: Точное совпадение полного названия
-            if track_name == target_normalized:
-                filtered.append(result)
-                continue
-            
-            # Вариант 2: Точное совпадение базовой части (без скобок)
-            if track_base == target_base:
-                filtered.append(result)
-                continue
-        
-        if filtered:
-            logger.debug(f"✓ Строгая фильтрация: {len(results)} → {len(filtered)} результатов")
-        else:
-            logger.debug(f"✗ Строгая фильтрация: нет точных совпадений для '{target_title}'")
-        
-        # ВАЖНО: Не возвращаем все результаты, если фильтр пустой!
-        # Лучше не найти текст, чем найти чужой
-        return filtered
-    
-    def _search_lrclib_all(self, artist: str, title: str, album: str = None, duration: int = None):
-        """
-        Двухэтапный поиск через lrclib.net: /api/search → массив результатов
-        
-        Args:
-            artist: имя исполнителя
-            title: название трека
-            album: название альбома (опционально)
-            duration: длительность в секундах (опционально)
-        
-        Returns:
-            List[dict] - массив всех найденных вариантов текста
-        """
-        results = []
-        
+        # --- Шаг 1: Получаем кандидатов с помощью /api/search ---
         try:
-            # Вариант 1: Поиск по точной сигнатуре (GET /api/get)
-            if duration:
-                url = "https://lrclib.net/api/get"
-                params = {
-                    'artist_name': artist,
-                    'track_name': title,
-                }
-                if album:
-                    params['album_name'] = album
-                if duration:
-                    params['duration'] = int(duration)
-                
-                response = self.session.get(url, params=params, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('syncedLyrics') or data.get('plainLyrics'):
-                        results.append(data)
-                        logger.debug(f"✓ Точный поиск (GET /api/get): найдено")
-            
-            # Вариант 2: Широкий поиск (GET /api/search) - основной
             url = "https://lrclib.net/api/search"
-            
-            # Формируем разные варианты поисковых запросов
-            search_queries = []
-            
-            # 1. Полный запрос: artist + title + album
+            params = {'track_name': title, 'artist_name': artist}
             if album:
-                search_queries.append(f"{artist} {title} {album}")
+                params['album_name'] = album
             
-            # 2. Базовый: artist + title
-            search_queries.append(f"{artist} {title}")
+            response = self.session.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            candidates = response.json()
             
-            # 3. Только title (для песен с разным написанием исполнителя)
-            search_queries.append(title)
-            
-            for query in search_queries:
-                try:
-                    params = {'q': query}
-                    response = self.session.get(url, params=params, timeout=10)
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        if isinstance(data, list) and len(data) > 0:
-                            logger.debug(f"✓ Поиск '{query}': найдено {len(data)} результатов")
-                            # Добавляем только новые результаты (по id)
-                            existing_ids = {r.get('id') for r in results}
-                            for item in data:
-                                if item.get('id') not in existing_ids:
-                                    results.append(item)
-                except Exception as e:
-                    logger.debug(f"Ошибка поиска '{query}': {e}")
-                    continue
-        
-        except Exception as e:
-            logger.debug(f"Ошибка поиска через lrclib.net: {e}")
-        
-        return results
-    
-    def _search_syncedlyrics(self, artist: str, title: str) -> Optional[str]:
-        """
-        Поиск через библиотеку syncedlyrics (приоритет synced, fallback на plain)
-        
-        Args:
-            artist: имя исполнителя
-            title: название трека
-        
-        Returns:
-            Синхронизированный или обычный текст
-        """
-        try:
-            import syncedlyrics
-            
-            search_query = f"{artist} - {title}"
-            
-            # Сначала пытаемся найти synced
-            result = syncedlyrics.search(search_query, allow_plain_format=False)
-            if result:
-                logger.debug("✓ syncedlyrics: найден СИНХРОНИЗИРОВАННЫЙ текст")
-                return result
-            
-            # Если synced не найден, пробуем plain
-            result = syncedlyrics.search(search_query, allow_plain_format=True)
-            if result:
-                logger.debug("✓ syncedlyrics: найден ОБЫЧНЫЙ текст")
-                return result
-            
-            logger.debug("syncedlyrics: текст не найден")
-            
-        except ImportError:
-            logger.warning("Библиотека syncedlyrics не установлена")
-        except Exception as e:
-            logger.debug(f"Ошибка поиска через syncedlyrics: {e}")
-        
-        return None
-    
-    def _process_lyrics(self, lyrics_raw: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Обработка найденного текста: определение формата и разделение
-        
-        Returns:
-            Tuple[plain_text, lrc_text]
-            - Если LRC: (plain_version, lrc_version)
-            - Если plain: (plain_text, None)
-        """
-        if not lyrics_raw:
+            if not candidates:
+                logger.warning("❌ LRCLib: Поиск не дал результатов")
+                return None, None
+        except (requests.RequestException, ValueError) as e:
+            logger.error(f"❌ LRCLib: Ошибка при запросе /api/search: {e}")
             return None, None
         
-        # Проверяем, есть ли LRC таймкоды (должно быть хотя бы 3 строки с таймкодами)
-        lrc_lines = [line for line in lyrics_raw.splitlines() 
-                     if re.search(r"\[\s*\d{1,2}:\d{2}(?:[\.:]\d{1,2})?\s*\]", line)]
+        logger.info(f"✓ Найдено {len(candidates)} кандидатов. Начинаем строгую фильтрацию...")
         
-        if len(lrc_lines) >= 3:  # Минимум 3 строки с таймкодами
-            lrc_text = self._normalize_lrc(lyrics_raw)
-            plain_text = self._lrc_to_plain(lrc_text)
-            logger.debug(f"✓ Обработан LRC текст ({len(lrc_lines)} строк с таймкодами)")
-            return plain_text, lrc_text
-        else:
-            # Обычный текст без таймкодов
-            plain_text = lyrics_raw.strip()
-            logger.debug(f"✓ Обработан обычный текст (без таймкодов)")
-            return plain_text, None
+        # --- Шаг 2: Фильтрация и выбор лучшего кандидата ---
+        
+        # Сначала ищем идеальный вариант: с синхронизированным текстом
+        best_synced_match = self._find_best_match(candidates, artist, title, duration or 0, require_synced=True)
+        if best_synced_match:
+            logger.info("✅ Найден лучший кандидат с СИНХРОНИЗИРОВАННЫМ текстом")
+            synced_lyrics = best_synced_match.get('syncedLyrics')
+            is_instr = self._is_instrumental_text(synced_lyrics) or best_synced_match.get('instrumental')
+            if is_instr:
+                logger.info("🎼 Трек определен как ИНСТРУМЕНТАЛЬНЫЙ")
+                return None, None
+            plain_lyrics = self._lrc_to_plain(synced_lyrics)
+            return plain_lyrics, synced_lyrics
+        
+        # Если синхронизированный не найден, ищем лучший вариант с обычным текстом
+        logger.info("⚠️ Синхронизированный текст не найден. Ищем лучший вариант с обычным текстом...")
+        best_plain_match = self._find_best_match(candidates, artist, title, duration or 0, require_synced=False)
+        if best_plain_match:
+            logger.info("✅ Найден лучший кандидат с ОБЫЧНЫМ текстом")
+            plain_lyrics = best_plain_match.get('plainLyrics')
+            is_instr = self._is_instrumental_text(plain_lyrics) or best_plain_match.get('instrumental')
+            if is_instr:
+                logger.info("🎼 Трек определен как ИНСТРУМЕНТАЛЬНЫЙ")
+                return None, None
+            return plain_lyrics, None
+        
+        logger.warning(f"❌ Текст не найден после строгой фильтрации для: {artist} - {title}")
+        return None, None
     
-    def _normalize_lrc(self, lyrics_lrc: str) -> str:
-        """Нормализация LRC: приведение таймкодов к единому формату [mm:ss.xx]"""
-        lines = lyrics_lrc.splitlines()
-        normalized_lines = []
+    def _find_best_match(self, candidates: List[Dict], target_artist: str, target_title: str, target_duration: int, require_synced: bool) -> Optional[Dict]:
+        """
+        Итерируется по списку кандидатов и выбирает лучший на основе набора строгих правил.
         
-        for line in lines:
-            # Проверяем наличие таймкода
-            if re.search(r"\[\s*\d{1,2}:\d{2}(?:[\.:]\d{1,2})?\s*\]", line):
-                # Приводим таймкоды к формату [mm:ss.xx]
-                def repl(m):
-                    ts = m.group(0).replace('[', '').replace(']', '').strip()
-                    parts = re.split(r"[:\.]", ts)
-                    mm = int(parts[0]) if parts and parts[0].isdigit() else 0
-                    ss = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-                    ff = 0
-                    if len(parts) > 2 and parts[2].isdigit():
-                        ff = int(parts[2])
-                        ff = max(0, min(ff, 99))
-                    return f"[{mm:02d}:{ss:02d}.{ff:02d}]"
-                
-                line = re.sub(r"\[\s*\d{1,2}:\d{2}(?:[\.:]\d{1,2})?\s*\]", repl, line, count=1)
-                normalized_lines.append(line)
+        Args:
+            candidates: список кандидатов от lrclib API
+            target_artist: целевой исполнитель
+            target_title: целевое название
+            target_duration: целевая длительность в секундах
+            require_synced: требовать наличие syncedLyrics
+        
+        Returns:
+            Лучший кандидат или None
+        """
+        best_candidate = None
+        highest_score = -1  # Используем -1, чтобы любой положительный результат был лучше
+        
+        MIN_ARTIST_SCORE = 90  # Требуем почти идеального совпадения исполнителя
+        
+        # Получаем "чистое" название целевого трека для сравнения
+        target_title_clean = self._get_clean_title(target_title)
+        
+        for item in candidates:
+            # --- Правило 1: Проверяем наличие нужного типа текста ---
+            if require_synced:
+                if not item.get('syncedLyrics'):
+                    continue
             else:
-                normalized_lines.append(line)
+                if not item.get('plainLyrics') and not item.get('syncedLyrics'):
+                    continue
+            
+            # --- Правило 2: Строгая проверка метаданных ---
+            item_title = item.get('trackName', '')
+            item_artist = item.get('artistName', '')
+            
+            # Сравниваем исполнителей
+            if FUZZ_AVAILABLE:
+                artist_score = fuzz.ratio(target_artist.lower(), item_artist.lower())
+                if artist_score < MIN_ARTIST_SCORE:
+                    logger.debug(f"Отброшен (артист): '{item_artist}' vs '{target_artist}' (схожесть {artist_score:.0f}%)")
+                    continue
+            else:  # Если fuzz недоступен, проверяем на простое вхождение
+                if target_artist.lower() not in item_artist.lower() and item_artist.lower() not in target_artist.lower():
+                    logger.debug(f"Отброшен (артист): '{item_artist}' vs '{target_artist}'")
+                    continue
+                artist_score = 95  # Присваиваем высокий балл при простом совпадении
+            
+            # Сравниваем названия. ЭТО КЛЮЧЕВОЙ МОМЕНТ!
+            item_title_clean = self._get_clean_title(item_title)
+            
+            # Мы требуем, чтобы "чистые" названия совпадали на 100%
+            if item_title_clean != target_title_clean:
+                logger.debug(f"Отброшен (название): '{item_title_clean}' vs '{target_title_clean}'")
+                continue
+            
+            # --- Правило 3: Проверка длительности ---
+            item_duration = item.get('duration', 0)
+            duration_diff = abs(target_duration - item_duration)
+            if target_duration > 0 and duration_diff > 3:  # Погрешность до 3 секунд
+                logger.debug(f"Отброшен (длительность): {item_duration}с vs {target_duration}с (разница {duration_diff:.1f}с)")
+                continue
+            
+            # --- Оценка кандидата ---
+            # Все проверки пройдены. Теперь выбираем лучшего из прошедших.
+            # Более высокое совпадение по артисту лучше.
+            # Меньшая разница в длительности лучше.
+            # Наличие synced-текста всегда лучше.
+            score = artist_score - (duration_diff * 10)  # Штрафуем за разницу в длительности
+            if item.get('syncedLyrics'):
+                score += 100  # Бонус за synced-текст
+            
+            if score > highest_score:
+                highest_score = score
+                best_candidate = item
         
-        # Удаляем пустые строки в начале и конце
-        while normalized_lines and not normalized_lines[0].strip():
-            normalized_lines.pop(0)
-        while normalized_lines and not normalized_lines[-1].strip():
-            normalized_lines.pop()
+        if best_candidate:
+            logger.info(f"✓ Выбран лучший кандидат: '{best_candidate['artistName']} - {best_candidate['trackName']}' (ID: {best_candidate['id']})")
         
-        return "\n".join(normalized_lines)
+        return best_candidate
     
     def _lrc_to_plain(self, lyrics_lrc: str) -> str:
         """Преобразование LRC в обычный текст (удаление таймкодов)"""
-        plain_lines = []
-        for line in lyrics_lrc.splitlines():
-            text = re.sub(r"^\s*\[[^\]]+\]\s*", "", line)
-            plain_lines.append(text)
-        return "\n".join(plain_lines)
+        if not lyrics_lrc:
+            return ""
+        text_no_timestamps = re.sub(r'\[\d{2}:\d{2}\.\d{2,3}\]', '', lyrics_lrc)
+        text_no_karaoke = re.sub(r'<\d{2}:\d{2}\.\d{2,3}>', '', text_no_timestamps)
+        return "\n".join(line.strip() for line in text_no_karaoke.splitlines() if line.strip())
     
     def lrc_to_srt(self, lyrics_lrc: str) -> str:
         """
