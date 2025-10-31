@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+qobuz_downloader.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Config (содержит учетные данные)
+.qobuz_lyrics_downloader/
+config/
+
+# Downloads (папка со скачанными файлами)
+downloads/
+Music/
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+$null
