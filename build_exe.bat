@@ -44,7 +44,7 @@ if not exist "dist\Qobuz_Gui_Downloader.exe" (
 
 echo [5/5] Создание README для dist...
 (
-echo Qobuz GUI Downloader v1.0.3
+echo Qobuz GUI Downloader v1.0.4
 echo.
 echo Запуск: Qobuz_Gui_Downloader.exe
 echo.

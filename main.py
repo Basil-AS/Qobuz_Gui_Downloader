@@ -28,8 +28,15 @@ class ConfigManager:
     """Менеджер конфигурации приложения"""
     
     def __init__(self):
-        # Используем папку программы вместо домашней папки пользователя
-        self.config_dir = Path(__file__).parent / "config"
+        # Определяем папку программы (работает и для .py и для .exe)
+        if getattr(sys, 'frozen', False):
+            # Если запущен как EXE (PyInstaller)
+            app_dir = Path(sys.executable).parent
+        else:
+            # Если запущен как скрипт .py
+            app_dir = Path(__file__).parent
+        
+        self.config_dir = app_dir / "config"
         self.config_dir.mkdir(exist_ok=True)
         
         self.credentials_file = self.config_dir / "credentials.json"
@@ -176,7 +183,7 @@ def main():
         try:
             import ctypes
             # Устанавливаем уникальный AppID для приложения
-            myappid = 'qobuzguidownloader.app.1.0.3'
+            myappid = 'qobuzguidownloader.app.1.0.4'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
             logger.info("✓ Windows AppUserModelID установлен")
         except Exception as e:
