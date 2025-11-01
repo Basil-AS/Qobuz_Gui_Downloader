@@ -28,7 +28,7 @@ class LyricsSearcher:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Qobuz GUI Downloader v1.0.2 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
+            'User-Agent': 'Qobuz GUI Downloader v1.0.3 (https://github.com/Basil-AS/Qobuz_Gui_Downloader)'
         })
     
     def _is_instrumental_text(self, text: str) -> bool:

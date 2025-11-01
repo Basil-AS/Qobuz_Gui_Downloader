@@ -33,10 +33,11 @@ class LoginThread(QThread):
 class LoginWindow(QDialog):
     """Окно авторизации в Qobuz"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config=None):
         super().__init__(parent)
         self.client = None
         self.login_thread = None
+        self.config = config  # ConfigManager для сохранения credentials
         self.init_ui()
         
     def init_ui(self):
@@ -232,8 +233,9 @@ class LoginWindow(QDialog):
         self.status_label.setText("Авторизация успешна!")
         self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
         
-        # Сохраняем учетные данные
-        self.save_credentials(self.email_input.text(), self.password_input.text())
+        # Сохраняем учетные данные через ConfigManager
+        if self.config:
+            self.config.save_credentials(self.email_input.text(), self.password_input.text())
         
         # Закрываем окно через небольшую задержку
         from PyQt6.QtCore import QTimer
@@ -251,29 +253,6 @@ class LoginWindow(QDialog):
         
         QMessageBox.critical(self, "Ошибка авторизации", f"Не удалось войти в Qobuz:\n{error_msg}")
         
-    def save_credentials(self, email, password):
-        """Сохранение учетных данных"""
-        import json
-        import base64
-        from pathlib import Path
-        
-        # Используем папку config в директории приложения
-        config_dir = Path(__file__).parent.parent / "config"
-        config_dir.mkdir(exist_ok=True)
-        
-        config_file = config_dir / "credentials.json"
-        
-        # Шифруем пароль
-        encrypted_password = base64.b64encode(password.encode()).decode()
-        
-        credentials = {
-            "email": email,
-            "password": encrypted_password
-        }
-        
-        with open(config_file, 'w') as f:
-            json.dump(credentials, f)
-            
     def get_client(self):
         """Получение клиента Qobuz"""
         return self.client

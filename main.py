@@ -55,6 +55,37 @@ class ConfigManager:
         
         return None, None
     
+    def save_credentials(self, email, password):
+        """Сохранение учетных данных"""
+        try:
+            # Шифруем пароль
+            encrypted_password = base64.b64encode(password.encode()).decode()
+            
+            credentials = {
+                "email": email,
+                "password": encrypted_password
+            }
+            
+            with open(self.credentials_file, 'w') as f:
+                json.dump(credentials, f, indent=2)
+            
+            logger.info("✓ Учетные данные сохранены")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении учетных данных: {e}")
+            return False
+    
+    def delete_credentials(self):
+        """Удаление учетных данных"""
+        try:
+            if self.credentials_file.exists():
+                self.credentials_file.unlink()
+                logger.info("✓ Учетные данные удалены")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении учетных данных: {e}")
+            return False
+    
     def load_settings(self):
         """Загрузка настроек"""
         if not self.settings_file.exists():
@@ -145,7 +176,7 @@ def main():
         try:
             import ctypes
             # Устанавливаем уникальный AppID для приложения
-            myappid = 'qobuzguidownloader.app.1.0.2'
+            myappid = 'qobuzguidownloader.app.1.0.3'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
             logger.info("✓ Windows AppUserModelID установлен")
         except Exception as e:
@@ -213,7 +244,7 @@ def main():
     if not qobuz_client:
         from gui.login_window import LoginWindow
         
-        login_window = LoginWindow()
+        login_window = LoginWindow(config=config)
         if login_window.exec():
             qobuz_client = login_window.get_client()
         else:
