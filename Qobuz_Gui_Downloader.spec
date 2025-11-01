@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller spec для Qobuz GUI Downloader v1.0.4
+# PyInstaller spec для Qobuz GUI Downloader v1.0.5
 
 block_cipher = None
 

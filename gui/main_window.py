@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QLabel, QTabWidget, QStatusBar, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QFont, QIcon
+from core.localization import t
 
 
 def create_message_box(parent, icon, title, text, buttons, default_button=None):
@@ -74,16 +75,16 @@ class DownloadThread(QThread):
             # Передаём ссылку на поток чтобы downloader мог проверять паузу
             downloader._download_thread = self
             
-            self.log_signal.emit(f"Начинаю обработку: {self.url}")
+            self.log_signal.emit(t('download_starting', url=self.url))
             success = downloader.download_url(self.url)
             
             if success:
-                self.finished_signal.emit(True, "Скачивание завершено успешно!")
+                self.finished_signal.emit(True, t('download_complete'))
             else:
-                self.finished_signal.emit(False, "Произошла ошибка при скачивании")
+                self.finished_signal.emit(False, t('download_error'))
                 
         except Exception as e:
-            self.finished_signal.emit(False, f"Ошибка: {str(e)}")
+            self.finished_signal.emit(False, t('error_occurred', error=str(e)))
     
     def stop(self):
         """Остановка потока"""
@@ -103,7 +104,7 @@ class MainWindow(QMainWindow):
         
     def init_ui(self):
         """Инициализация интерфейса"""
-        self.setWindowTitle("Qobuz GUI Downloader")
+        self.setWindowTitle(t('app_title'))
         self.setMinimumSize(900, 600)
         
         # Устанавливаем иконку приложения
@@ -121,35 +122,35 @@ class MainWindow(QMainWindow):
         
         # Верхняя панель с вводом URL
         url_layout = QHBoxLayout()
-        url_label = QLabel("URL Qobuz:")
+        url_label = QLabel(t('url_label'))
         url_label.setMinimumWidth(80)
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Вставьте ссылку на трек, альбом, артиста или плейлист...")
+        self.url_input.setPlaceholderText(t('url_placeholder'))
         self.url_input.returnPressed.connect(self.start_download)
         
-        self.download_btn = QPushButton("Скачать")
+        self.download_btn = QPushButton(t('download_button'))
         self.download_btn.setMinimumWidth(120)
         self.download_btn.clicked.connect(self.start_download)
         
-        self.pause_btn = QPushButton("⏸ Пауза")
+        self.pause_btn = QPushButton(t('pause_button'))
         self.pause_btn.setMinimumWidth(100)
         self.pause_btn.clicked.connect(self.toggle_pause)
         self.pause_btn.setEnabled(False)
         
-        self.stop_btn = QPushButton("⏹ Стоп")
+        self.stop_btn = QPushButton(t('stop_button'))
         self.stop_btn.setMinimumWidth(100)
         self.stop_btn.clicked.connect(self.stop_download)
         self.stop_btn.setEnabled(False)
         
-        self.settings_btn = QPushButton("Настройки")
+        self.settings_btn = QPushButton(t('settings_button'))
         self.settings_btn.setMinimumWidth(120)
         self.settings_btn.clicked.connect(self.open_settings)
         
-        self.logout_btn = QPushButton("Выход из аккаунта")
+        self.logout_btn = QPushButton(t('logout_button'))
         self.logout_btn.setMinimumWidth(140)
         self.logout_btn.clicked.connect(self.logout)
         
-        self.exit_btn = QPushButton("✕ Выход")
+        self.exit_btn = QPushButton(t('exit_button'))
         self.exit_btn.setMinimumWidth(100)
         self.exit_btn.clicked.connect(self.exit_app)
         
@@ -166,7 +167,7 @@ class MainWindow(QMainWindow):
         
         # Прогресс-бар
         progress_layout = QHBoxLayout()
-        progress_label = QLabel("Прогресс:")
+        progress_label = QLabel(t('progress_label'))
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
@@ -178,7 +179,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(progress_layout)
         
         # Область логов
-        log_label = QLabel("Лог процесса:")
+        log_label = QLabel(t('log_label'))
         main_layout.addWidget(log_label)
         
         self.log_text = QTextEdit()
@@ -189,7 +190,7 @@ class MainWindow(QMainWindow):
         # Статусная строка
         self.statusBar = QStatusBar()
         self.setStatusBar(self.statusBar)
-        self.statusBar.showMessage("Готов к работе")
+        self.statusBar.showMessage(t('status_ready'))
         
         # Применяем стили
         self.apply_styles()
@@ -274,28 +275,28 @@ class MainWindow(QMainWindow):
         url = self.url_input.text().strip()
         
         if not url:
-            self.log("⚠ Ошибка: Введите URL")
-            self.statusBar.showMessage("Ошибка: URL не указан")
+            self.log(t('error_no_url'))
+            self.statusBar.showMessage(t('error_no_url'))
             return
             
         if not self.qobuz_client:
-            self.log("⚠ Ошибка: Нет авторизации в Qobuz")
-            self.statusBar.showMessage("Ошибка: Требуется авторизация")
+            self.log(t('error_no_auth'))
+            self.statusBar.showMessage(t('error_no_auth'))
             return
             
         if not self.settings:
-            self.log("⚠ Ошибка: Настройки не загружены")
-            self.statusBar.showMessage("Ошибка: Настройки не найдены")
+            self.log(t('error_no_settings'))
+            self.statusBar.showMessage(t('error_no_settings'))
             return
         
         # Отключаем кнопку скачивания, включаем управление
         self.download_btn.setEnabled(False)
-        self.download_btn.setText("Скачиваю...")
+        self.download_btn.setText(t('downloading'))
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.is_paused = False
         self.progress_bar.setValue(0)
-        self.statusBar.showMessage("Скачивание...")
+        self.statusBar.showMessage(t('status_downloading'))
         
         # Очищаем лог
         self.log_text.clear()
@@ -315,17 +316,17 @@ class MainWindow(QMainWindow):
         if self.is_paused:
             # Возобновить
             self.download_thread._is_paused = False
-            self.pause_btn.setText("⏸ Пауза")
+            self.pause_btn.setText(t('pause_button'))
             self.is_paused = False
-            self.log("▶ Скачивание возобновлено")
-            self.statusBar.showMessage("Скачивание возобновлено...")
+            self.log(t('status_resumed'))
+            self.statusBar.showMessage(t('status_downloading'))
         else:
             # Пауза
             self.download_thread._is_paused = True
-            self.pause_btn.setText("▶ Продолжить")
+            self.pause_btn.setText(t('resume_button'))
             self.is_paused = True
-            self.log("⏸ Скачивание приостановлено")
-            self.statusBar.showMessage("Приостановлено")
+            self.log(t('status_paused'))
+            self.statusBar.showMessage(t('status_paused'))
     
     def stop_download(self):
         """Остановка скачивания"""
@@ -335,20 +336,20 @@ class MainWindow(QMainWindow):
         msg = create_message_box(
             self,
             QMessageBox.Icon.Question,
-            "Подтверждение",
-            "Вы уверены, что хотите остановить скачивание?",
+            t('confirm'),
+            t('confirm_stop'),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         reply = msg.exec()
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.log("⏹ Остановка скачивания...")
+            self.log(t('status_stopping'))
             self.download_thread.stop()
             self.download_thread.wait(3000)  # Ждём 3 секунды
             if self.download_thread.isRunning():
                 self.download_thread.terminate()  # Принудительная остановка
             
-            self.download_finished(False, "Скачивание прервано пользователем")
+            self.download_finished(False, t('download_stopped'))
     
     def exit_app(self):
         """Выход из приложения"""
@@ -358,8 +359,8 @@ class MainWindow(QMainWindow):
             msg = create_message_box(
                 self,
                 QMessageBox.Icon.Question,
-                "Подтверждение выхода",
-                "Идёт скачивание. Прервать и выйти?",
+                t('confirm'),
+                t('confirm_exit'),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             reply = msg.exec()
@@ -378,9 +379,9 @@ class MainWindow(QMainWindow):
     def download_finished(self, success, message):
         """Обработка завершения скачивания"""
         self.download_btn.setEnabled(True)
-        self.download_btn.setText("Скачать")
+        self.download_btn.setText(t('download_button'))
         self.pause_btn.setEnabled(False)
-        self.pause_btn.setText("⏸ Пауза")
+        self.pause_btn.setText(t('pause_button'))
         self.stop_btn.setEnabled(False)
         self.is_paused = False
         
@@ -401,7 +402,7 @@ class MainWindow(QMainWindow):
         settings_window = SettingsWindow(self.settings, self)
         if settings_window.exec():
             self.settings = settings_window.get_settings()
-            self.log("✓ Настройки обновлены")
+            self.log(t('settings_updated'))
             # Сохраняем настройки сразу
             self.save_settings_to_file()
     
@@ -418,9 +419,9 @@ class MainWindow(QMainWindow):
             with open(settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.settings, f, indent=2, ensure_ascii=False)
             
-            self.log("💾 Настройки сохранены")
+            self.log(t('settings_saved'))
         except Exception as e:
-            self.log(f"⚠ Ошибка сохранения настроек: {e}")
+            self.log(t('error_save_settings', error=str(e)))
     
     def logout(self):
         """Выход из аккаунта"""
@@ -430,9 +431,8 @@ class MainWindow(QMainWindow):
         msg = create_message_box(
             self,
             QMessageBox.Icon.Question,
-            "Выход из аккаунта",
-            "Вы уверены, что хотите выйти из текущего аккаунта?\n\n"
-            "Сохранённые учетные данные будут удалены.",
+            t('logout_title'),
+            t('logout_confirm'),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -446,13 +446,13 @@ class MainWindow(QMainWindow):
                 
                 if credentials_file.exists():
                     credentials_file.unlink()
-                    self.log("✓ Учетные данные удалены")
+                    self.log(t('credentials_deleted'))
                 
                 msg = create_message_box(
                     self,
                     QMessageBox.Icon.Information,
-                    "Выход выполнен",
-                    "Вы вышли из аккаунта.\nПриложение будет перезапущено.",
+                    t('logout_success_title'),
+                    t('logout_success'),
                     QMessageBox.StandardButton.Ok
                 )
                 msg.exec()
@@ -468,8 +468,8 @@ class MainWindow(QMainWindow):
                 msg = create_message_box(
                     self,
                     QMessageBox.Icon.Critical,
-                    "Ошибка",
-                    f"Не удалось выполнить выход:\n{str(e)}",
+                    t('error'),
+                    t('error_logout', error=str(e)),
                     QMessageBox.StandardButton.Ok
                 )
                 msg.exec()

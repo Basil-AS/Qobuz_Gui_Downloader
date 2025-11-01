@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QLineEdit, QPushButton, QMessageBox, QProgressBar)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont, QIcon
+from core.localization import t
 
 
 class LoginThread(QThread):
@@ -42,7 +43,7 @@ class LoginWindow(QDialog):
         
     def init_ui(self):
         """Инициализация интерфейса"""
-        self.setWindowTitle("Вход в Qobuz")
+        self.setWindowTitle(t('login_title'))
         self.setFixedSize(500, 350)
         self.setModal(True)
         
@@ -63,28 +64,28 @@ class LoginWindow(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
         
-        subtitle = QLabel("Войдите в свой аккаунт Qobuz")
+        subtitle = QLabel(t('login_subtitle'))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(subtitle)
         
         layout.addSpacing(20)
         
         # Email
-        email_label = QLabel("Email:")
+        email_label = QLabel(t('login_email'))
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("Введите ваш email")
+        self.email_input.setPlaceholderText(t('login_email_placeholder'))
         self.email_input.returnPressed.connect(self.login)
         
         layout.addWidget(email_label)
         layout.addWidget(self.email_input)
         
         # Пароль
-        password_label = QLabel("Пароль:")
+        password_label = QLabel(t('login_password'))
         
         # Контейнер для пароля с кнопкой показа
         password_container = QHBoxLayout()
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Введите ваш пароль")
+        self.password_input.setPlaceholderText(t('login_password_placeholder'))
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.returnPressed.connect(self.login)
         
@@ -93,7 +94,7 @@ class LoginWindow(QDialog):
         self.show_password_btn.setFixedWidth(40)
         self.show_password_btn.setCheckable(True)
         self.show_password_btn.clicked.connect(self.toggle_password_visibility)
-        self.show_password_btn.setToolTip("Показать/скрыть пароль")
+        self.show_password_btn.setToolTip(t('login_toggle_password'))
         
         password_container.addWidget(self.password_input)
         password_container.addWidget(self.show_password_btn)
@@ -118,11 +119,11 @@ class LoginWindow(QDialog):
         # Кнопки
         buttons_layout = QHBoxLayout()
         
-        self.login_btn = QPushButton("Войти")
+        self.login_btn = QPushButton(t('login_button'))
         self.login_btn.setMinimumHeight(35)
         self.login_btn.clicked.connect(self.login)
         
-        self.cancel_btn = QPushButton("Отмена")
+        self.cancel_btn = QPushButton(t('cancel_button'))
         self.cancel_btn.setMinimumHeight(35)
         self.cancel_btn.clicked.connect(self.reject)
         
@@ -132,7 +133,7 @@ class LoginWindow(QDialog):
         layout.addLayout(buttons_layout)
         
         # Примечание
-        note = QLabel("Примечание: Требуется платная подписка Qobuz")
+        note = QLabel(t('login_note'))
         note.setStyleSheet("color: #999; font-size: 10px;")
         note.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(note)
@@ -211,7 +212,7 @@ class LoginWindow(QDialog):
         password = self.password_input.text().strip()
         
         if not email or not password:
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, заполните все поля")
+            QMessageBox.warning(self, t('error'), t('login_fill_fields'))
             return
         
         # Блокируем UI
@@ -219,7 +220,7 @@ class LoginWindow(QDialog):
         self.email_input.setEnabled(False)
         self.password_input.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.status_label.setText("Авторизация...")
+        self.status_label.setText(t('login_authenticating'))
         
         # Запускаем поток авторизации
         self.login_thread = LoginThread(email, password)
@@ -230,7 +231,7 @@ class LoginWindow(QDialog):
     def on_login_success(self, client):
         """Обработка успешной авторизации"""
         self.client = client
-        self.status_label.setText("Авторизация успешна!")
+        self.status_label.setText(t('login_success'))
         self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
         
         # Сохраняем учетные данные через ConfigManager
@@ -240,7 +241,7 @@ class LoginWindow(QDialog):
         # Закрываем окно через небольшую задержку
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(500, self.accept)
-        
+    
     def on_login_error(self, error_msg):
         """Обработка ошибки авторизации"""
         self.progress_bar.setVisible(False)
@@ -251,7 +252,7 @@ class LoginWindow(QDialog):
         self.email_input.setEnabled(True)
         self.password_input.setEnabled(True)
         
-        QMessageBox.critical(self, "Ошибка авторизации", f"Не удалось войти в Qobuz:\n{error_msg}")
+        QMessageBox.critical(self, t('login_error_title'), f"{t('login_error')}\n{error_msg}")
         
     def get_client(self):
         """Получение клиента Qobuz"""
